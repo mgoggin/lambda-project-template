@@ -1,0 +1,5 @@
+{
+  "functionName": "lambda-test",
+  "role": "arn:aws:iam::<account-id>:role/service-role/<role-name>",
+  "handler": "lambda.default"
+}

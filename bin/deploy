@@ -1,0 +1,75 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const path = require('path');
+const os = require('os');
+
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const LIB_DIR = PROJECT_ROOT + '/lib';
+
+const formatDate = require('date-fns/format');
+const distanceInWordsStrict = require('date-fns/distance_in_words_strict');
+
+const logger = require(LIB_DIR + '/deploy/logger');
+const createBundleArtifact = require(LIB_DIR + '/deploy/createBundleArtifact');
+const encodeBundleArtifactFile = require(LIB_DIR + '/deploy/encodeBundleArtifactFile');
+const functionExists = require(LIB_DIR + '/deploy/functionExists');
+const createFunction = require(LIB_DIR + '/deploy/createFunction');
+const updateFunction = require(LIB_DIR + '/deploy/updateFunction');
+
+const packageMetadata = require(PROJECT_ROOT + '/package.json');
+const config = require(PROJECT_ROOT + '/.deploy.json');
+
+const fileTimestamp = formatDate((new Date()), 'YYYYMMDDHHmmss');
+
+const buildArtifactDir = path.resolve(__dirname, '..', 'dist');
+const bundleArtifactFilename = `${packageMetadata.name}_v${packageMetadata.version}_${fileTimestamp}.zip`;
+const bundleArtifactFile = path.resolve(os.tmpdir(), bundleArtifactFilename);
+
+const doDeploy = async () => {
+  const startTime = new Date();
+
+  logger.info('Preparing to deploy...');
+
+  try {
+    const bytesWritten = await createBundleArtifact(bundleArtifactFile, buildArtifactDir);
+    logger.info(`Created bundle artifact: ${bundleArtifactFile} (${bytesWritten} bytes)`);
+
+    const encodedData = await encodeBundleArtifactFile(bundleArtifactFile);
+
+    logger.info('Deploying...');
+
+    const itExists = await functionExists(config.functionName);
+    if(itExists) {
+      logger.info(`Lambda function '${config.functionName}' already exists. Updating...`);
+      const metadata = await updateFunction(config.functionName, encodedData);
+
+      logger.info(`Successfully updated Lambda function '${config.functionName}'.`);
+      logger.info(`ARN: ${metadata['FunctionArn']}`);
+    }
+    else {
+      logger.info(`Lambda function '${config.functionName}' doesn't exist. Creating...`);
+      const metadata = await createFunction(
+        config.functionName,
+        config.role,
+        config.handler,
+        encodedData
+      );
+
+      logger.info(`Successfully created Lambda function '${config.functionName}'.`);
+      logger.info(`ARN: ${metadata['FunctionArn']}`);
+    }
+
+    const endTime = new Date();
+
+    logger.info('Deploy completed successfully.');
+    logger.info(`Process took ${distanceInWordsStrict(startTime, endTime, { partialMethod: 'ceil' })}.`);
+  }
+  catch(err) {
+    logger.error(err.message);
+    process.exit(1);
+  }
+};
+
+doDeploy();
